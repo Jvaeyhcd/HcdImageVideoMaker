@@ -39,7 +39,9 @@ typedef enum : NSUInteger {
 typedef enum : NSUInteger {
     ImageMovementNone = 0,
     ImageMovementFade,
-    ImageMovementScale
+    ImageMovementZoomOut,
+    ImageMovementZoomIn,
+    ImageMovementFixed
 } ImageMovement;
 
 typedef enum : NSUInteger {
@@ -72,6 +74,7 @@ typedef void(^ProgressBlock)(CGFloat progress);
 @property (nonatomic, assign) NSInteger transitionDuration;
 @property (nonatomic, assign) NSInteger transitionFrameCount;
 @property (nonatomic, assign) NSInteger framesToWaitBeforeTransition;
+@property (nonatomic, assign) BOOL blurBackground;
 
 - (instancetype)initWithImages:(NSMutableArray *)images transition:(ImageTransition)transition;
 

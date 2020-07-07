@@ -14,6 +14,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (UIImage *)imageWithView:(UIView *)view;
 
+/// blur image
+/// @param image origin image
+/// @param blur blur 0~1
++ (UIImage *)blurImage:(UIImage *)image blurLevel:(CGFloat)blur;
+
 @end
 
 NS_ASSUME_NONNULL_END

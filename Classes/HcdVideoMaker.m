@@ -12,6 +12,9 @@
 #import "HcdVideoExporter.h"
 #import "UIImage+HAdd.h"
 
+#define SCREEN_WIDTH [UIScreen mainScreen].bounds.size.width
+#define SCREEN_HEIGHT [UIScreen mainScreen].bounds.size.height
+
 @interface HcdVideoMaker ()
 
 @property (nonatomic, strong) AVAssetWriter *videoWriter;
@@ -71,13 +74,13 @@
     self.transition = ImageTransitionNone;
     self.movement = ImageMovementNone;
     self.movementFade = MovementFadeUpLeft;
-    self.contentMode = UIViewContentModeScaleAspectFit;
+    self.contentMode = UIViewContentModeScaleAspectFill;
     
     self.quarity = kCGInterpolationLow;
-    self.size = CGSizeMake(640, 640);
+    self.size = CGSizeMake(640, 640 * SCREEN_HEIGHT / SCREEN_WIDTH);
     self.definition = 1;
-    self.frameDuration = 3;
-    self.transitionDuration = 3;
+    self.frameDuration = 2;
+    self.transitionDuration = 1;
     self.transitionFrameCount = 60;
     self.framesToWaitBeforeTransition = 30;
     
@@ -86,7 +89,7 @@
     self.transitionRate = 1;
     self.isMixed = NO;
     self.isMovement = NO;
-    self.fadeOffset = 30;
+    self.fadeOffset = SCREEN_WIDTH / 4;
     self.mediaInputQueue = dispatch_queue_create("mediaInputQueue", DISPATCH_QUEUE_SERIAL);
     self.flags = 0;
     
@@ -138,7 +141,6 @@
 }
 
 - (void)setCurrentProgress:(float)currentProgress {
-    
     _currentProgress = currentProgress;
     if (self.progress) {
         self.progress(self.currentProgress);
@@ -168,19 +170,19 @@
     self.timescale = hasSetDuration ? 100000 : 1;
     NSInteger average = 2;
     if (hasSetDuration) {
-        average = self.videoDuration * self.timescale / self.images.count;
+        average = (int)(self.videoDuration * self.timescale / self.images.count);
     }
     
     if (self.isMovement) {
         self.frameDuration = 0;
-        self.transitionDuration = hasSetDuration ? average : 1;
+        self.transitionDuration = hasSetDuration ? average : 2;
     } else {
         self.frameDuration = hasSetDuration ? average : (isFadeLong ? 3 : 2);
-        self.transitionDuration = isFadeLong ? self.frameDuration * 2 / 3 : self.transitionFrameCount / 2;
+        self.transitionDuration = isFadeLong ? (int)(self.frameDuration * 2 / 3) : (int)(self.frameDuration / 2);
     }
     
     NSInteger frame = self.isMovement ? 20 : 60;
-    self.transitionFrameCount = frame * self.transitionDuration / self.timescale;
+    self.transitionFrameCount = (int)(frame * self.transitionDuration / self.timescale);
     self.framesToWaitBeforeTransition = isFadeLong ? self.transitionFrameCount / 3 : self.transitionFrameCount / 2;
     
     self.transitionRate = 1 / (double)self.transitionDuration / (double)self.timescale;
@@ -199,15 +201,25 @@
         CGSize size = CGSizeMake(self.size.width * self.definition, self.size.height * self.definition);
         
         CGSize viewSize = self.isMovement && self.movement == ImageMovementFade ? CGSizeMake(size.width + self.fadeOffset, size.height + self.fadeOffset) : size;
+        
         UIView *view = [[UIView alloc] initWithFrame:CGRectMake(0, 0, viewSize.width, viewSize.height)];
         view.backgroundColor = [UIColor blackColor];
+        
+        if (self.blurBackground) {
+            UIImageView *bgImageView = [[UIImageView alloc] initWithImage:[UIImage blurImage:image blurLevel:0.6]];
+            bgImageView.frame = view.bounds;
+            bgImageView.contentMode = UIViewContentModeScaleAspectFill;
+            [view addSubview:bgImageView];
+        }
+        
         UIImageView *imageView = [[UIImageView alloc] initWithImage:image];
         imageView.contentMode = self.contentMode;
-        imageView.backgroundColor = [UIColor blackColor];
+        imageView.backgroundColor = [UIColor clearColor];
         imageView.frame = view.bounds;
         [view addSubview:imageView];
         UIImage *newImage = [UIImage imageWithView:view];
         [newImages addObject:newImage];
+        
     }
     self.images = newImages;
 }
@@ -231,6 +243,10 @@
     if (!self.images || self.images.count == 0) {
         return;
     }
+    
+    // Config
+    self.isMixed = self.movement == ImageMovementFixed;
+    [self changeNextIfNeeded];
     
     // path
     NSURL *path = [[HcdFileManager MovURL] URLByAppendingPathComponent:[NSString stringWithFormat:@"%@.mov", @(self.movement)]];
@@ -259,9 +275,13 @@
     NSDictionary *bufferAttributes = @{
         (NSString *)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32ARGB)
     };
-    AVAssetWriterInputPixelBufferAdaptor *bufferAdapter = [AVAssetWriterInputPixelBufferAdaptor assetWriterInputPixelBufferAdaptorWithAssetWriterInput:writerInput sourcePixelBufferAttributes:bufferAttributes];
+    AVAssetWriterInputPixelBufferAdaptor *bufferAdapter = [AVAssetWriterInputPixelBufferAdaptor assetWriterInputPixelBufferAdaptorWithAssetWriterInput:writerInput
+                                                                                                                           sourcePixelBufferAttributes:bufferAttributes];
     
-    [self startCombine:self.videoWriter writerInput:writerInput bufferAdapter:bufferAdapter completed:^(BOOL success, NSURL * _Nonnull videoURL) {
+    [self startCombine:self.videoWriter
+           writerInput:writerInput
+         bufferAdapter:bufferAdapter
+             completed:^(BOOL success, NSURL * _Nonnull videoURL) {
         completed(success, path);
     }];
 }
@@ -286,13 +306,31 @@
             UIImage *presentImage = self.images[i];
             UIImage *nextImage = self.images.count > 1 && i != self.images.count - 1 ? self.images[i + 1] : nil;
             
-            presentTime = self.isMovement ? [self appendMovementBuffer:i presentImage:presentImage nextImage:nextImage time:presentTime writerInput:writerInput bufferAdapter:bufferAdapter] : [self appendTransitionBuffer:i presentImage:presentImage nextImage:nextImage time:presentTime writerInput:writerInput bufferAdapter:bufferAdapter];
+            if (self.isMovement) {
+                presentTime = [self appendMovementBuffer:i
+                                            presentImage:presentImage
+                                               nextImage:nextImage
+                                                    time:presentTime
+                                             writerInput:writerInput
+                                           bufferAdapter:bufferAdapter];
+            } else {
+                presentTime = [self appendTransitionBuffer:i
+                                              presentImage:presentImage
+                                                 nextImage:nextImage
+                                                      time:presentTime
+                                               writerInput:writerInput
+                                             bufferAdapter:bufferAdapter];
+            }
             
             i += 1;
+            [self changeNextIfNeeded];
         }
         [writerInput markAsFinished];
         [videoWriter finishWritingWithCompletionHandler:^{
             dispatch_async(dispatch_get_main_queue(), ^{
+                if (videoWriter.error) {
+                    NSLog(@"%@", videoWriter.error);
+                }
                 completed(videoWriter.error == nil, nil);
             });
         }];
@@ -321,12 +359,9 @@
             [NSThread sleepForTimeInterval:0.1];
         }
         
-        if (movementBuffer) {
-            if ([bufferAdapter appendPixelBuffer:movementBuffer withPresentationTime:presentTime]) {
-                CFRelease(movementBuffer);
-                movementBuffer = NULL;
-            }
-        }
+        [bufferAdapter appendPixelBuffer:movementBuffer withPresentationTime:presentTime];
+        CFRelease(movementBuffer);
+        movementBuffer = NULL;
         
         self.currentProgress = timeRate + self.transitionTimeRate * rate;
         presentTime = CMTimeAdd(presentTime, movementTime);
@@ -336,11 +371,11 @@
 }
 
 - (CMTime)appendTransitionBuffer:(NSInteger)position
-                  presentImage:(UIImage *)presentImage
-                     nextImage:(UIImage *)nextImage
-                          time:(CMTime)time
-                   writerInput:(AVAssetWriterInput *)writerInput
-                 bufferAdapter:(AVAssetWriterInputPixelBufferAdaptor *)bufferAdapter {
+                    presentImage:(UIImage *)presentImage
+                       nextImage:(UIImage *)nextImage
+                            time:(CMTime)time
+                     writerInput:(AVAssetWriterInput *)writerInput
+                   bufferAdapter:(AVAssetWriterInputPixelBufferAdaptor *)bufferAdapter {
     
     CMTime presentTime = time;
     
@@ -351,12 +386,9 @@
         [NSThread sleepForTimeInterval:0.1];
     }
     
-    if (buffer) {
-        if ([bufferAdapter appendPixelBuffer:buffer withPresentationTime:presentTime]) {
-            CFRelease(buffer);
-            buffer = NULL;
-        }
-    }
+    [bufferAdapter appendPixelBuffer:buffer withPresentationTime:presentTime];
+    CFRelease(buffer);
+    buffer = NULL;
     
     self.currentProgress += self.waitTranstionTimeRate;
     
@@ -369,20 +401,21 @@
             
             float timeRate = self.currentProgress;
             for (NSInteger j = 1; j <= framesToTransitionCount; j++) {
+                
                 CGFloat rate = j / (double)framesToTransitionCount;
+                
                 CVPixelBufferRef transitionBuffer = [self transitionPixelBuffer:cgImage toImage:nextImage.CGImage transition:self.transition rate:rate];
                 while (!writerInput.isReadyForMoreMediaData) {
                     [NSThread sleepForTimeInterval:0.1];
                 }
                 
-                if (transitionBuffer) {
-                    if ([bufferAdapter appendPixelBuffer:transitionBuffer withPresentationTime:presentTime]) {
-                        CFRelease(transitionBuffer);
-                        transitionBuffer = NULL;
-                    }
-                }
+                [bufferAdapter appendPixelBuffer:transitionBuffer withPresentationTime:presentTime];
+                CFRelease(transitionBuffer);
+                transitionBuffer = NULL;
                 
                 self.currentProgress = timeRate + self.transitionTimeRate * rate;
+//                NSLog(@"j = %@, position = %@, currentProgress = %lf", @(j), @(position), self.currentProgress);
+                
                 presentTime = CMTimeAdd(presentTime, transitionTime);
             }
         }
@@ -393,59 +426,55 @@
 
 - (CVPixelBufferRef)movementPixelBuffer:(CGImageRef)cgImage movement:(ImageMovement)movement rate:(CGFloat)rate {
     
-    @autoreleasepool {
-        CVPixelBufferRef buffer = [self createBuffer];
-        if (!buffer) {
-            return nil;
-        }
-        
-        CVPixelBufferLockBaseAddress(buffer, self.flags);
-        
-        void *pxdata = CVPixelBufferGetBaseAddress(buffer);
-        NSParameterAssert(pxdata != NULL);
-        CGColorSpaceRef rgbColorSpace = CGColorSpaceCreateDeviceRGB();
-        
-        CGContextRef context = CGBitmapContextCreate(pxdata, self.size.width, self.size.height, 8, CVPixelBufferGetBytesPerRow(buffer), rgbColorSpace, kCGImageAlphaNoneSkipFirst);
-        NSParameterAssert(context);
-        
-        CGContextSetInterpolationQuality(context, self.quarity);
-        [self performMovementDrawing:context cgImage:cgImage movement:self.movement rate:rate];
-        
-        CGColorSpaceRelease(rgbColorSpace);
-        CGContextRelease(context);
-        
-        CVPixelBufferUnlockBaseAddress(buffer, self.flags);
-        
-        return buffer;
+    CVPixelBufferRef buffer = [self createBuffer];
+    if (!buffer) {
+        return nil;
     }
+    
+    CVPixelBufferLockBaseAddress(buffer, self.flags);
+    
+    void *pxdata = CVPixelBufferGetBaseAddress(buffer);
+    NSParameterAssert(pxdata != NULL);
+    CGColorSpaceRef rgbColorSpace = CGColorSpaceCreateDeviceRGB();
+    
+    CGContextRef context = CGBitmapContextCreate(pxdata, self.size.width, self.size.height, 8, CVPixelBufferGetBytesPerRow(buffer), rgbColorSpace, kCGImageAlphaNoneSkipFirst);
+    NSParameterAssert(context);
+    
+    CGContextSetInterpolationQuality(context, self.quarity);
+    [self performMovementDrawing:context cgImage:cgImage movement:self.movement rate:rate];
+    
+    CGColorSpaceRelease(rgbColorSpace);
+    CGContextRelease(context);
+    
+    CVPixelBufferUnlockBaseAddress(buffer, self.flags);
+    
+    return buffer;
 }
 
 - (CVPixelBufferRef)transitionPixelBuffer:(CGImageRef)fromImage toImage:(CGImageRef)toImage transition:(ImageTransition)transition rate:(CGFloat)rate {
     
-    @autoreleasepool {
-        CVPixelBufferRef buffer = [self createBuffer];
-        if (!buffer) {
-            return nil;
-        }
-        
-        CVPixelBufferLockBaseAddress(buffer, self.flags);
-        
-        void *pxdata = CVPixelBufferGetBaseAddress(buffer);
-
-        CGColorSpaceRef rgbColorSpace = CGColorSpaceCreateDeviceRGB();
-        
-        CGContextRef context = CGBitmapContextCreate(pxdata, self.size.width, self.size.height, 8, CVPixelBufferGetBytesPerRow(buffer), rgbColorSpace, kCGImageAlphaNoneSkipFirst);
-        
-        CGContextSetInterpolationQuality(context, self.quarity);
-        [self performTransitionDrawing:context from:fromImage to:toImage transition:self.transition rate:rate];
-        
-        CGColorSpaceRelease(rgbColorSpace);
-        CGContextRelease(context);
-        
-        CVPixelBufferUnlockBaseAddress(buffer, self.flags);
-        
-        return buffer;
+    CVPixelBufferRef buffer = [self createBuffer];
+    if (!buffer) {
+        return nil;
     }
+    
+    CVPixelBufferLockBaseAddress(buffer, self.flags);
+    
+    void *pxdata = CVPixelBufferGetBaseAddress(buffer);
+
+    CGColorSpaceRef rgbColorSpace = CGColorSpaceCreateDeviceRGB();
+    
+    CGContextRef context = CGBitmapContextCreate(pxdata, self.size.width, self.size.height, 8, CVPixelBufferGetBytesPerRow(buffer), rgbColorSpace, kCGImageAlphaNoneSkipFirst);
+    
+    CGContextSetInterpolationQuality(context, self.quarity);
+    [self performTransitionDrawing:context from:fromImage to:toImage transition:self.transition rate:rate];
+    
+    CGColorSpaceRelease(rgbColorSpace);
+    CGContextRelease(context);
+    
+    CVPixelBufferUnlockBaseAddress(buffer, self.flags);
+    
+    return buffer;
 }
 
 - (void)performTransitionDrawing:(CGContextRef)context from:(CGImageRef)from to:(CGImageRef)to  transition:(ImageTransition)transition rate:(CGFloat)rate {
@@ -488,7 +517,7 @@
             CGFloat height = (rate + 1) * fromFitSize.height;
             
             CGRect fromRect = CGRectMake(-(width - fromFitSize.width) / 2,
-                                         -(height - fromFitSize.width) / 2,
+                                         -(height - fromFitSize.height) / 2,
                                          width,
                                          height);
             
@@ -594,7 +623,7 @@
         case ImageTransitionSlideUp: {
             
             CGRect fromRect = CGRectMake(0, 0, fromFitSize.width, fromFitSize.height);
-            CGRect toRect = CGRectMake(0, -(1 - rate) * self.size.width, toFitSize.width, toFitSize.height);
+            CGRect toRect = CGRectMake(0, -(1 - rate) * self.size.height, toFitSize.width, toFitSize.height);
             
             CGContextDrawImage(context, fromRect, from);
             CGContextDrawImage(context, toRect, to);
@@ -604,7 +633,7 @@
         case ImageTransitionSlideDown: {
             
             CGRect fromRect = CGRectMake(0, 0, fromFitSize.width, fromFitSize.height);
-            CGRect toRect = CGRectMake(0, (1 - rate) * self.size.width, toFitSize.width, toFitSize.height);
+            CGRect toRect = CGRectMake(0, (1 - rate) * self.size.height, toFitSize.width, toFitSize.height);
             
             CGContextDrawImage(context, fromRect, from);
             CGContextDrawImage(context, toRect, to);
@@ -691,11 +720,22 @@
             
             break;
         }
-        case ImageMovementScale: {
+        case ImageMovementZoomOut: {
             CGFloat width = rate * self.fadeOffset + fromFitSize.width;
             CGFloat height = rate * self.fadeOffset + fromFitSize.height;
             
-            CGRect rect = CGRectMake(-(width - fromFitSize.width) / 2, -(height - fromFitSize.width) / 2, width, height);
+            CGRect rect = CGRectMake(-(width - fromFitSize.width) / 2, -(height - fromFitSize.height) / 2, width, height);
+            
+            CGContextDrawImage(context, rect, cgImage);
+            
+            break;
+        }
+        case ImageMovementZoomIn: {
+            
+            CGFloat width = 1.5 * fromFitSize.width - rate * self.fadeOffset;
+            CGFloat height = 1.5 * fromFitSize.height - rate * self.fadeOffset;
+            
+            CGRect rect = CGRectMake(-(width - fromFitSize.width) / 2, -(height - fromFitSize.height) / 2, width, height);
             
             CGContextDrawImage(context, rect, cgImage);
             
@@ -761,9 +801,13 @@
     NSDictionary *bufferAttributes = @{
         (NSString *)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32ARGB)
     };
-    AVAssetWriterInputPixelBufferAdaptor *bufferAdapter = [AVAssetWriterInputPixelBufferAdaptor assetWriterInputPixelBufferAdaptorWithAssetWriterInput:writerInput sourcePixelBufferAttributes:bufferAttributes];
+    AVAssetWriterInputPixelBufferAdaptor *bufferAdapter = [AVAssetWriterInputPixelBufferAdaptor assetWriterInputPixelBufferAdaptorWithAssetWriterInput:writerInput
+                                                                                                                           sourcePixelBufferAttributes:bufferAttributes];
     
-    [self startCombine:self.videoWriter writerInput:writerInput bufferAdapter:bufferAdapter completed:^(BOOL success, NSURL * _Nonnull videoURL) {
+    [self startCombine:self.videoWriter
+           writerInput:writerInput
+         bufferAdapter:bufferAdapter
+             completed:^(BOOL success, NSURL * _Nonnull videoURL) {
         completed(success, path);
     }];
 }
@@ -776,7 +820,178 @@
 }
 
 - (void)changeNextIfNeeded {
+    if (self.isMovement) {
+        if (self.movement == ImageMovementFade) {
+            // change movementFade
+            self.movementFade = [self nextMovementFade:self.movementFade];
+        } else if (self.isMixed) {
+            // change movement
+            self.movement = [self nextMovement:self.movement];
+        }
+    } else {
+        if (self.isMixed) {
+            // change transition
+            self.transition = [self nextTransition:self.transition];
+        }
+    }
+}
+
+- (ImageTransition)nextTransition:(ImageTransition)transition {
     
+    ImageTransition next = transition;
+    
+    switch (next) {
+        case ImageTransitionWipeMixed:
+        case ImageTransitionWipeUp:
+        case ImageTransitionWipeDown:
+        case ImageTransitionWipeLeft:
+        case ImageTransitionWipeRight:
+            next = [self wipeNext:next];
+            break;
+        case ImageTransitionSlideMixed:
+        case ImageTransitionSlideUp:
+        case ImageTransitionSlideDown:
+        case ImageTransitionSlideLeft:
+        case ImageTransitionSlideRight:
+            next = [self slideNext:next];
+            break;
+        case ImageTransitionPushMixed:
+        case ImageTransitionPushUp:
+        case ImageTransitionPushDown:
+        case ImageTransitionPushLeft:
+        case ImageTransitionPushRight:
+            next = [self pushNext:next];
+            break;
+        default:
+            break;
+    }
+    
+    return next;
+}
+
+- (ImageMovement)nextMovement:(ImageMovement)movement {
+    
+    ImageMovement next = movement;
+    
+    switch (next) {
+        case ImageMovementFixed:
+            next = ImageMovementZoomIn;
+            break;
+        case ImageMovementZoomIn:
+            next = ImageMovementZoomOut;
+            break;
+        case ImageMovementZoomOut:
+            next = ImageMovementFade;
+            break;
+        default:
+            break;
+    }
+    
+    return next;
+}
+
+- (MovementFade)nextMovementFade:(MovementFade)movementFade {
+    
+    MovementFade next = movementFade;
+    
+    switch (next) {
+        case MovementFadeUpLeft:
+            next = MovementFadeUpRight;
+            break;
+        case MovementFadeUpRight:
+            next = MovementFadeBottomLeft;
+            break;
+        case MovementFadeBottomLeft:
+            next = MovementFadeBottomRight;
+            break;
+        case MovementFadeBottomRight:
+            next = MovementFadeUpLeft;
+            break;
+        default:
+            break;
+    }
+    
+    return next;
+}
+
+- (ImageTransition)wipeNext:(ImageTransition)transition {
+    
+    ImageTransition next = transition;
+    
+    switch (next) {
+        case ImageTransitionWipeMixed:
+            next = ImageTransitionWipeRight;
+            break;
+        case ImageTransitionWipeRight:
+            next = ImageTransitionWipeLeft;
+            break;
+        case ImageTransitionWipeLeft:
+            next = ImageTransitionWipeUp;
+            break;
+        case ImageTransitionWipeUp:
+            next = ImageTransitionWipeDown;
+            break;
+        case ImageTransitionWipeDown:
+            next = ImageTransitionWipeRight;
+            break;
+        default:
+            break;
+    }
+    
+    return next;
+}
+
+- (ImageTransition)slideNext:(ImageTransition)transition {
+    
+    ImageTransition next = transition;
+    
+    switch (next) {
+        case ImageTransitionSlideMixed:
+            next = ImageTransitionSlideRight;
+            break;
+        case ImageTransitionSlideRight:
+            next = ImageTransitionSlideLeft;
+            break;
+        case ImageTransitionSlideLeft:
+            next = ImageTransitionSlideUp;
+            break;
+        case ImageTransitionSlideUp:
+            next = ImageTransitionSlideDown;
+            break;
+        case ImageTransitionSlideDown:
+            next = ImageTransitionSlideRight;
+            break;
+        default:
+            break;
+    }
+    
+    return next;
+}
+
+- (ImageTransition)pushNext:(ImageTransition)transition {
+    ImageTransition next = transition;
+    
+    switch (next) {
+        case ImageTransitionPushMixed:
+            next = ImageTransitionPushRight;
+            break;
+        case ImageTransitionPushRight:
+            next = ImageTransitionPushLeft;
+            break;
+        case ImageTransitionPushLeft:
+            next = ImageTransitionPushUp;
+            break;
+        case ImageTransitionPushUp:
+            next = ImageTransitionPushDown;
+            break;
+        case ImageTransitionPushDown:
+            next = ImageTransitionPushRight;
+            break;
+        default:
+            break;
+    }
+    
+    return next;
 }
 
 - (void)createDirectory {

@@ -111,6 +111,9 @@
     }
 }
 
+/// Add music into video
+/// @param item musicItem
+/// @param audioCompositionTrack audioCompositionTrack callback block
 - (void)addMusicVideoItem:(HcdVideoItem *)item audioCompositionTrack:(AVMutableCompositionTrack *)audioCompositionTrack {
     
     AVURLAsset *audio = item.audio;
@@ -182,6 +185,7 @@
         } else {
             weakSelf.exportingBlock(YES, 1.0, path, nil);
         }
+        NSLog(@"export completed");
     }];
 }
 
@@ -193,6 +197,7 @@
 
 - (void)readProgress {
     if (self.exporter) {
+        NSLog(@"%s %@", __func__, @(self.exporter.progress));
         self.exportingBlock(NO, self.exporter.progress, nil, nil);
     }
 }
