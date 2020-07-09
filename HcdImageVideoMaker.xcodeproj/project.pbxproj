@@ -16,6 +16,11 @@
 		B91AED5B24AF316A00BCC1A6 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = B91AED5A24AF316A00BCC1A6 /* main.m */; };
 		B91AED6524AF316B00BCC1A6 /* HcdImageVideoMakerTests.m in Sources */ = {isa = PBXBuildFile; fileRef = B91AED6424AF316B00BCC1A6 /* HcdImageVideoMakerTests.m */; };
 		B91AED7024AF316B00BCC1A6 /* HcdImageVideoMakerUITests.m in Sources */ = {isa = PBXBuildFile; fileRef = B91AED6F24AF316B00BCC1A6 /* HcdImageVideoMakerUITests.m */; };
+		B91AED8124B0A97200BCC1A6 /* HcdVideoMaker.m in Sources */ = {isa = PBXBuildFile; fileRef = B91AED8024B0A97200BCC1A6 /* HcdVideoMaker.m */; };
+		B94D8ABE24B1658A001C4DEC /* HcdVideoExporter.m in Sources */ = {isa = PBXBuildFile; fileRef = B94D8ABD24B1658A001C4DEC /* HcdVideoExporter.m */; };
+		B94D8AC124B165CA001C4DEC /* HcdFileManager.m in Sources */ = {isa = PBXBuildFile; fileRef = B94D8AC024B165CA001C4DEC /* HcdFileManager.m */; };
+		B94D8AC724B1669F001C4DEC /* UIImage+HAdd.m in Sources */ = {isa = PBXBuildFile; fileRef = B94D8AC624B1669F001C4DEC /* UIImage+HAdd.m */; };
+		B94D8ACC24B20BC4001C4DEC /* Sound.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = B94D8ACB24B20BC4001C4DEC /* Sound.mp3 */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -54,6 +59,15 @@
 		B91AED6B24AF316B00BCC1A6 /* HcdImageVideoMakerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HcdImageVideoMakerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B91AED6F24AF316B00BCC1A6 /* HcdImageVideoMakerUITests.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HcdImageVideoMakerUITests.m; sourceTree = "<group>"; };
 		B91AED7124AF316B00BCC1A6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B91AED7F24B0A97200BCC1A6 /* HcdVideoMaker.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = HcdVideoMaker.h; sourceTree = "<group>"; };
+		B91AED8024B0A97200BCC1A6 /* HcdVideoMaker.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HcdVideoMaker.m; sourceTree = "<group>"; };
+		B94D8ABC24B1658A001C4DEC /* HcdVideoExporter.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = HcdVideoExporter.h; sourceTree = "<group>"; };
+		B94D8ABD24B1658A001C4DEC /* HcdVideoExporter.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HcdVideoExporter.m; sourceTree = "<group>"; };
+		B94D8ABF24B165CA001C4DEC /* HcdFileManager.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = HcdFileManager.h; sourceTree = "<group>"; };
+		B94D8AC024B165CA001C4DEC /* HcdFileManager.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HcdFileManager.m; sourceTree = "<group>"; };
+		B94D8AC524B1669F001C4DEC /* UIImage+HAdd.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "UIImage+HAdd.h"; sourceTree = "<group>"; };
+		B94D8AC624B1669F001C4DEC /* UIImage+HAdd.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "UIImage+HAdd.m"; sourceTree = "<group>"; };
+		B94D8ACB24B20BC4001C4DEC /* Sound.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = Sound.mp3; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -84,6 +98,8 @@
 		B91AED3C24AF316500BCC1A6 = {
 			isa = PBXGroup;
 			children = (
+				B91AED7E24B0A11800BCC1A6 /* Assets */,
+				B91AED7D24B0A10500BCC1A6 /* Classes */,
 				B91AED4724AF316600BCC1A6 /* HcdImageVideoMaker */,
 				B91AED6324AF316B00BCC1A6 /* HcdImageVideoMakerTests */,
 				B91AED6E24AF316B00BCC1A6 /* HcdImageVideoMakerUITests */,
@@ -135,6 +151,29 @@
 				B91AED7124AF316B00BCC1A6 /* Info.plist */,
 			);
 			path = HcdImageVideoMakerUITests;
+			sourceTree = "<group>";
+		};
+		B91AED7D24B0A10500BCC1A6 /* Classes */ = {
+			isa = PBXGroup;
+			children = (
+				B91AED7F24B0A97200BCC1A6 /* HcdVideoMaker.h */,
+				B91AED8024B0A97200BCC1A6 /* HcdVideoMaker.m */,
+				B94D8ABC24B1658A001C4DEC /* HcdVideoExporter.h */,
+				B94D8ABD24B1658A001C4DEC /* HcdVideoExporter.m */,
+				B94D8ABF24B165CA001C4DEC /* HcdFileManager.h */,
+				B94D8AC024B165CA001C4DEC /* HcdFileManager.m */,
+				B94D8AC524B1669F001C4DEC /* UIImage+HAdd.h */,
+				B94D8AC624B1669F001C4DEC /* UIImage+HAdd.m */,
+			);
+			path = Classes;
+			sourceTree = "<group>";
+		};
+		B91AED7E24B0A11800BCC1A6 /* Assets */ = {
+			isa = PBXGroup;
+			children = (
+				B94D8ACB24B20BC4001C4DEC /* Sound.mp3 */,
+			);
+			path = Assets;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -240,6 +279,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B94D8ACC24B20BC4001C4DEC /* Sound.mp3 in Resources */,
 				B91AED5824AF316A00BCC1A6 /* LaunchScreen.storyboard in Resources */,
 				B91AED5524AF316A00BCC1A6 /* Assets.xcassets in Resources */,
 				B91AED5324AF316600BCC1A6 /* Main.storyboard in Resources */,
@@ -267,9 +307,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B91AED8124B0A97200BCC1A6 /* HcdVideoMaker.m in Sources */,
 				B91AED5024AF316600BCC1A6 /* ViewController.m in Sources */,
+				B94D8ABE24B1658A001C4DEC /* HcdVideoExporter.m in Sources */,
 				B91AED4A24AF316600BCC1A6 /* AppDelegate.m in Sources */,
 				B91AED5B24AF316A00BCC1A6 /* main.m in Sources */,
+				B94D8AC124B165CA001C4DEC /* HcdFileManager.m in Sources */,
+				B94D8AC724B1669F001C4DEC /* UIImage+HAdd.m in Sources */,
 				B91AED4D24AF316600BCC1A6 /* SceneDelegate.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -442,6 +486,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = NLP5PZS8U3;
 				INFOPLIST_FILE = HcdImageVideoMaker/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -459,6 +504,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = NLP5PZS8U3;
 				INFOPLIST_FILE = HcdImageVideoMaker/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

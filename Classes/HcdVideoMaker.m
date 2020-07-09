@@ -31,6 +31,10 @@
 @property (nonatomic, assign) float transitionTimeRate;
 @property (nonatomic, assign) float writerTimeRate;
 @property (nonatomic, assign) float currentProgress;
+
+/// 视频正在制作中
+@property (nonatomic, assign) BOOL isMaking;
+
 @end
 
 @implementation HcdVideoMaker
@@ -101,21 +105,26 @@
 
 - (HcdVideoMaker *)exportVideo:(AVURLAsset *)audio audioTimeRange:(CMTimeRange)audioTimeRange completed:(CompletedCombineBlock)completed {
     
+    if (self.isMaking) {
+        return self;
+    }
     [self createDirectory];
+    self.isMaking = YES;
     self.currentProgress = 0.0;
     __weak typeof(self) weakSelf = self;
     [self combineVideo:^(BOOL success, NSURL * _Nullable videoURL) {
+        weakSelf.isMaking = NO;
         if (success && videoURL != nil) {
             AVURLAsset *video = [AVURLAsset assetWithURL:videoURL];
             HcdVideoItem *item = [[HcdVideoItem alloc] init];
             item.video = video;
             item.audio = audio;
             item.audioTimeRange = audioTimeRange;
-            self.videoExporter = [[HcdVideoExporter alloc] initWithVideoItem:item];
-            [self.videoExporter startExport];
+            weakSelf.videoExporter = [[HcdVideoExporter alloc] initWithVideoItem:item];
+            [weakSelf.videoExporter startExport];
             float timeRate = self.currentProgress;
             __strong typeof(weakSelf) strongSelf = weakSelf;
-            self.videoExporter.exportingBlock = ^(BOOL exportCompleted, CGFloat progress, NSURL * _Nonnull url, NSError * _Nonnull error) {
+            weakSelf.videoExporter.exportingBlock = ^(BOOL exportCompleted, CGFloat progress, NSURL * _Nonnull url, NSError * _Nonnull error) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     strongSelf.currentProgress = exportCompleted ? 1 : timeRate + (progress > 0 ? progress : 1) * self.exportTimeRate;
                     completed(exportCompleted, url);
@@ -195,48 +204,63 @@
     [self calculatorTimeRate];
 }
 
-- (void)makeImageFit {
-    NSMutableArray *newImages = [NSMutableArray array];
-    for (UIImage *image in self.images) {
-        CGSize size = CGSizeMake(self.size.width * self.definition, self.size.height * self.definition);
+- (void)makeImageFit:(void (^)(void))complete {
+    
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         
-        CGSize viewSize = self.isMovement && self.movement == ImageMovementFade ? CGSizeMake(size.width + self.fadeOffset, size.height + self.fadeOffset) : size;
-        
-        UIView *view = [[UIView alloc] initWithFrame:CGRectMake(0, 0, viewSize.width, viewSize.height)];
-        view.backgroundColor = [UIColor blackColor];
-        
-        if (self.blurBackground) {
-            UIImageView *bgImageView = [[UIImageView alloc] initWithImage:[UIImage blurImage:image blurLevel:0.6]];
-            bgImageView.frame = view.bounds;
-            bgImageView.contentMode = UIViewContentModeScaleAspectFill;
-            [view addSubview:bgImageView];
-        }
-        
-        UIImageView *imageView = [[UIImageView alloc] initWithImage:image];
-        imageView.contentMode = self.contentMode;
-        imageView.backgroundColor = [UIColor clearColor];
-        imageView.frame = view.bounds;
-        [view addSubview:imageView];
-        UIImage *newImage = [UIImage imageWithView:view];
-        [newImages addObject:newImage];
-        
-    }
-    self.images = newImages;
+        __weak typeof(weakSelf) strongSelf = weakSelf;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            @autoreleasepool {
+                NSMutableArray *newImages = [NSMutableArray array];
+                for (UIImage *image in weakSelf.images) {
+                    CGSize size = CGSizeMake(self.size.width * self.definition, self.size.height * self.definition);
+                    
+                    CGSize viewSize = self.isMovement && self.movement == ImageMovementFade ? CGSizeMake(size.width + self.fadeOffset, size.height + self.fadeOffset) : size;
+                    
+                    UIView *view = [[UIView alloc] initWithFrame:CGRectMake(0, 0, viewSize.width, viewSize.height)];
+                    view.backgroundColor = [UIColor blackColor];
+                    
+                    if (self.blurBackground) {
+                        UIImageView *bgImageView = [[UIImageView alloc] initWithImage:[UIImage blurImage:image blurLevel:0.6]];
+                        bgImageView.frame = view.bounds;
+                        bgImageView.contentMode = UIViewContentModeScaleAspectFill;
+                        [view addSubview:bgImageView];
+                    }
+                    
+                    UIImageView *imageView = [[UIImageView alloc] initWithImage:image];
+                    imageView.contentMode = self.contentMode;
+                    imageView.backgroundColor = [UIColor clearColor];
+                    imageView.frame = view.bounds;
+                    [view addSubview:imageView];
+                    UIImage *newImage = [UIImage imageWithView:view];
+                    [newImages addObject:newImage];
+                    
+                }
+                strongSelf.images = newImages;
+                
+                complete();
+            }
+        });
+    });
 }
 
 - (void)combineVideo:(CompletedCombineBlock)completed {
-    [self makeImageFit];
-    if (self.isMovement) {
-        if (self.movement == ImageMovementNone) {
-            self.isMovement = NO;
-            self.transition = ImageTransitionNone;
-            [self makeTransitionVideo:self.transition completed:completed];
+    NSLog(@"--------start deal image--------");
+    [self makeImageFit:^{
+        NSLog(@"--------end deal image--------");
+        if (self.isMovement) {
+            if (self.movement == ImageMovementNone) {
+                self.isMovement = NO;
+                self.transition = ImageTransitionNone;
+                [self makeTransitionVideo:self.transition completed:completed];
+            } else {
+                [self makeMovementVideo:self.movement completed:completed];
+            }
         } else {
-            [self makeMovementVideo:self.movement completed:completed];
+            [self makeTransitionVideo:self.transition completed:completed];
         }
-    } else {
-        [self makeTransitionVideo:self.transition completed:completed];
-    }
+    }];
 }
 
 - (void)makeMovementVideo:(ImageMovement)movement completed:(CompletedCombineBlock)completed {
@@ -715,6 +739,11 @@
             
             CGContextSetFillColorWithColor(context, [UIColor colorWithRed:0 green:0 blue:0 alpha:1.0].CGColor);
             CGContextSetStrokeColorWithColor(context, [UIColor blackColor].CGColor);
+//            if (rate > 0.8) {
+//                CGContextSetAlpha(context, 1 - rate + 0.8);
+//            } else {
+//                CGContextSetAlpha(context, 1);
+//            }
             CGContextFillRect(context, CGRectMake(0, 0, self.size.width, self.size.height));
             CGContextDrawImage(context, rect, cgImage);
             

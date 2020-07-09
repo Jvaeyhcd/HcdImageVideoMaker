@@ -181,9 +181,13 @@
         [timer invalidate];
         
         if (weakSelf.exporter.status == AVAssetExportSessionStatusFailed) {
-            weakSelf.exportingBlock(NO, 0.0, nil, weakSelf.exporter.error);
+            if (weakSelf.exportingBlock) {
+                weakSelf.exportingBlock(NO, 0.0, nil, weakSelf.exporter.error);
+            }
         } else {
-            weakSelf.exportingBlock(YES, 1.0, path, nil);
+            if (weakSelf.exportingBlock) {
+                weakSelf.exportingBlock(YES, 1.0, path, nil);
+            }
         }
         NSLog(@"export completed");
     }];

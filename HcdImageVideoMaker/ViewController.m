@@ -19,6 +19,8 @@
 
 @property (nonatomic, strong) NSURL *videoPath;
 
+@property (nonatomic, strong) HcdVideoMaker *maker;
+
 @end
 
 @implementation ViewController
@@ -34,7 +36,7 @@
     [button setBounds:CGRectMake(0,0,SCREEN_WIDTH * 0.25,50)];
     button.center = CGPointMake(SCREEN_WIDTH * 0.25, SCREEN_HEIGHT * 0.15);
     [button setTitle:@"视频合成"forState:UIControlStateNormal];
-    [button addTarget:self action:@selector(makeVideo)forControlEvents:UIControlEventTouchUpInside];
+    [button addTarget:self action:@selector(clickMakeVideo)forControlEvents:UIControlEventTouchUpInside];
     button.backgroundColor = [UIColor redColor];
     [self.view addSubview:button];
     
@@ -69,6 +71,19 @@
     [bgImageView addSubview:effectview];
 }
 
+- (void)clickMakeVideo {
+    
+//    __weak typeof(self) weakSelf = self;
+//    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+//        __strong typeof(weakSelf) strongSelf = weakSelf;
+//        dispatch_async(dispatch_get_main_queue(), ^{
+//            [strongSelf makeVideo];
+//        });
+//    });
+    self.progressLbl.text = @"开始制作...";
+    [self makeVideo];
+}
+
 - (void)makeVideo {
     
     NSArray *imageArray = @[
@@ -87,13 +102,9 @@
     CMTime audioDuration =  CMTimeMakeWithSeconds(30, audio.duration.timescale);
     CMTimeRange timeRange = CMTimeRangeMake(kCMTimeZero, audioDuration);
     
-    HcdVideoMaker *maker = [[HcdVideoMaker alloc] initWithImages:[imageArray copy] movement:ImageMovementFixed];
-    maker.contentMode = UIViewContentModeScaleAspectFit;
-    maker.blurBackground = YES;
-//    maker.videoDuration = imageArray.count * 3;
-    
     __weak typeof(self) weakSelf = self;
-    [maker exportVideo:audio audioTimeRange:timeRange completed:^(BOOL success, NSURL * _Nullable videoURL) {
+    self.maker.images = [imageArray copy];
+    [self.maker exportVideo:audio audioTimeRange:timeRange completed:^(BOOL success, NSURL * _Nullable videoURL) {
         if (success) {
             NSLog(@"videoURL:%@", videoURL);
             weakSelf.videoPath = videoURL;
@@ -114,6 +125,19 @@
     vc.modalPresentationStyle = UIModalPresentationFullScreen;
     [self presentViewController:vc animated:YES completion:nil];
     
+}
+
+#pragma mark - lazy load
+
+- (HcdVideoMaker *)maker {
+    
+    if (!_maker) {
+        HcdVideoMaker *maker = [[HcdVideoMaker alloc] initWithImages:[NSMutableArray array] movement:ImageMovementFixed];
+        maker.contentMode = UIViewContentModeScaleAspectFit;
+        maker.blurBackground = YES;
+        _maker = maker;
+    };
+    return _maker;
 }
 
 @end
