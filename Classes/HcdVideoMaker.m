@@ -15,6 +15,11 @@
 #define SCREEN_WIDTH [UIScreen mainScreen].bounds.size.width
 #define SCREEN_HEIGHT [UIScreen mainScreen].bounds.size.height
 
+typedef enum : NSUInteger {
+    TransitionTypeDissolve,
+    TransitionTypePush
+} TransitionType;
+
 @interface HcdVideoMaker ()
 
 @property (nonatomic, strong) AVAssetWriter *videoWriter;
@@ -34,6 +39,14 @@
 
 /// 视频正在制作中
 @property (nonatomic, assign) BOOL isMaking;
+
+@property (nonatomic, copy) NSMutableArray *videoURLs;
+
+@property (nonatomic, strong) AVMutableComposition *composition;
+
+@property (nonatomic, strong) AVMutableVideoComposition *videoComposition;
+
+@property (nonatomic, strong) CALayer *overLayer;
 
 @end
 
@@ -184,7 +197,7 @@
     
     if (self.isMovement) {
         self.frameDuration = 0;
-        self.transitionDuration = hasSetDuration ? average : 2;
+        self.transitionDuration = hasSetDuration ? average : 3;
     } else {
         self.frameDuration = hasSetDuration ? average : (isFadeLong ? 3 : 2);
         self.transitionDuration = isFadeLong ? (int)(self.frameDuration * 2 / 3) : (int)(self.frameDuration / 2);
@@ -255,7 +268,7 @@
                 self.transition = ImageTransitionNone;
                 [self makeTransitionVideo:self.transition completed:completed];
             } else {
-                [self makeMovementVideo:self.movement completed:completed];
+                [self hcd_makeMovementVideo:self.movement completed:completed];
             }
         } else {
             [self makeTransitionVideo:self.transition completed:completed];
@@ -310,13 +323,18 @@
     }];
 }
 
-- (void)startCombine:(AVAssetWriter *)videoWriter writerInput:(AVAssetWriterInput *)writerInput bufferAdapter:(AVAssetWriterInputPixelBufferAdaptor *)bufferAdapter completed:(CompletedCombineBlock)completed {
+- (void)startCombine:(AVAssetWriter *)videoWriter
+         writerInput:(AVAssetWriterInput *)writerInput
+       bufferAdapter:(AVAssetWriterInputPixelBufferAdaptor *)bufferAdapter
+           completed:(CompletedCombineBlock)completed {
     
     [videoWriter startWriting];
     [videoWriter startSessionAtSourceTime:kCMTimeZero];
     
     __block CMTime presentTime = CMTimeMakeWithSeconds(0, (int32_t)self.timescale);
     __block NSInteger i = 0;
+    
+    
     
     [writerInput requestMediaDataWhenReadyOnQueue:self.mediaInputQueue usingBlock:^{
         while (true) {
@@ -1025,6 +1043,301 @@
 
 - (void)createDirectory {
     [[NSFileManager defaultManager] createDirectoryAtURL:[HcdFileManager MovURL] withIntermediateDirectories:YES attributes:nil error:nil];
+}
+
+#pragma mark - 新思路制作视频
+
+- (void)hcd_makeMovementVideo:(ImageMovement)movement completed:(CompletedCombineBlock)completed {
+    if (!self.images || self.images.count == 0) {
+        return;
+    }
+    
+    // Config
+    self.isMixed = self.movement == ImageMovementFixed;
+    [self changeNextIfNeeded];
+    
+    // config
+    [self calculateTime];
+    
+    // makeVideo
+    // dispatch_semaphore_t 保证按照顺序执行
+    // dispatch_group_t 保证全部执行完成后，进行多个视屏合并的切换处理
+    dispatch_semaphore_t sem = dispatch_semaphore_create(1);
+    dispatch_group_t group = dispatch_group_create();
+    
+    __block NSMutableArray *videoURLs = [[NSMutableArray alloc] init];
+    for (NSInteger i = 0; i < self.images.count; i++) {
+        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+        dispatch_group_enter(group);
+        [self makeVideoWithIndex:i completed:^(BOOL success, NSURL * _Nullable videoURL) {
+            dispatch_semaphore_signal(sem);
+            dispatch_group_leave(group);
+            [videoURLs addObject:videoURL];
+        }];
+    }
+    
+    __weak typeof(self) weakSelf = self;
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        NSLog(@"制作完成");
+        // 拿到所有的视频地址的值
+        weakSelf.videoURLs = videoURLs;
+        [weakSelf buildCompositionVideoTracks];
+        [weakSelf buildVideoComposition];
+//        [weakSelf buildOverLayer];
+        [weakSelf export:^(BOOL success, NSURL * _Nullable videoURL) {
+            completed(success, videoURL);
+        }];
+    });
+    
+}
+
+#pragma mark - 将多个视频合并为一个视频，并添加切换的效果
+
+/// 创建视频轨道
+- (void)buildCompositionVideoTracks {
+    
+    self.composition = [[AVMutableComposition alloc] init];
+    
+    // 创建A、B两条视频轨道，视频片段交叉插入到轨道中，通过两条轨道的叠加编辑各种效果。如0-5秒内，A轨道内容alpha逐渐到0，B轨道内容alpha逐渐到1
+    AVMutableCompositionTrack *trackA = [self.composition addMutableTrackWithMediaType:AVMediaTypeVideo preferredTrackID:kCMPersistentTrackID_Invalid];
+    AVMutableCompositionTrack *trackB = [self.composition addMutableTrackWithMediaType:AVMediaTypeVideo preferredTrackID:kCMPersistentTrackID_Invalid];
+    
+    NSArray *videoTracks = @[trackA, trackB];
+    
+    // 视频片段插入时的起始点
+    CMTime cursorTime = kCMTimeZero;
+    // 转场动画时间
+    CMTime transitionDuration = CMTimeMake(1, 1);
+    for (NSInteger index = 0; index < self.videoURLs.count; index++) {
+        NSURL *videoURL = [self.videoURLs objectAtIndex:index];
+        AVAsset *asset = [AVAsset assetWithURL:videoURL];
+        // 交叉循环A，B轨道
+        NSInteger trackIndex = index % 2;
+        AVMutableCompositionTrack *currentTrack = [videoTracks objectAtIndex:trackIndex];
+        
+        NSArray *tracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+        if (tracks && tracks.count > 0) {
+            
+            AVAssetTrack *assetTrack = tracks.firstObject;
+            
+            NSError *error = nil;
+            // 插入提取的视频轨道到空白轨道的指定位置
+            [currentTrack insertTimeRange:CMTimeRangeMake(kCMTimeZero, asset.duration) ofTrack:assetTrack atTime:cursorTime error:&error];
+            
+            if (error == nil) {
+                // 光标移动到视频末尾处，以便插入下一段视频
+                cursorTime = CMTimeAdd(cursorTime, asset.duration);
+                // 光标回退转场动画时长的距离，这一段前后视频重叠部分组合成转场动画
+                cursorTime = CMTimeSubtract(cursorTime, transitionDuration);
+            }
+        }
+    }
+}
+
+/// 设置videoComposition来描述A、B轨道该如何显示
+- (void)buildVideoComposition {
+    
+    // 创建默认配置的videoComposition
+    AVMutableVideoComposition *videoComposition = [AVMutableVideoComposition videoCompositionWithPropertiesOfAsset:self.composition];
+    self.videoComposition = videoComposition;
+    
+    [self filterTransitionInstructionsOfVideoComposition:self.videoComposition];
+}
+
+/// 过滤出转场动画指令
+/// @param videoCompostion videoCompostion
+- (void)filterTransitionInstructionsOfVideoComposition:(AVMutableVideoComposition *)videoCompostion {
+    
+    NSArray *instructions = videoCompostion.instructions;
+    for (NSInteger index = 0; index < instructions.count; index++) {
+        
+        AVMutableVideoCompositionInstruction *instruction = (AVMutableVideoCompositionInstruction *)[instructions objectAtIndex:index];
+        
+        // 非转场动画区域只有单轨道（另一个是空白的），只有两个轨道重叠的情况是我们要处理的转场区域
+        if (instruction.layerInstructions.count > 1) {
+            
+            TransitionType transitionType;
+            // 需要判断转场动画是从A轨道到B，还是B-A
+            AVMutableVideoCompositionLayerInstruction *fromLayerInstruction, *toLayerInstruction;
+            // 获取前一段画面轨道id
+            CMPersistentTrackID beforeTrackId = 0;
+            if (index > 0) {
+                AVVideoCompositionInstruction *beforeInstruction = [instructions objectAtIndex:index - 1];
+                beforeTrackId = [beforeInstruction.layerInstructions objectAtIndex:0].trackID;
+            }
+            
+            // 跟前一画面同一轨道的为转场起点，另一轨道的终点
+            CMPersistentTrackID tempTrackId = [instruction.layerInstructions objectAtIndex:0].trackID;
+            if (beforeTrackId == tempTrackId) {
+                fromLayerInstruction = (AVMutableVideoCompositionLayerInstruction *)[instruction.layerInstructions objectAtIndex:0];
+                toLayerInstruction = (AVMutableVideoCompositionLayerInstruction *)[instruction.layerInstructions objectAtIndex:1];
+            } else {
+                fromLayerInstruction = (AVMutableVideoCompositionLayerInstruction *)[instruction.layerInstructions objectAtIndex:1];
+                toLayerInstruction = (AVMutableVideoCompositionLayerInstruction *)[instruction.layerInstructions objectAtIndex:0];
+            }
+            
+            transitionType = TransitionTypeDissolve;
+            
+            [self setupTransition:instruction fromLayer:fromLayerInstruction toLayer:toLayerInstruction type:transitionType];
+        }
+    }
+}
+
+/// 设置转场动画
+/// @param instruction AVMutableVideoCompositionInstruction
+/// @param fromLayer AVMutableVideoCompositionLayerInstruction
+/// @param toLayer AVMutableVideoCompositionLayerInstruction
+/// @param type 转场动画类型
+- (void)setupTransition:(AVMutableVideoCompositionInstruction *)instruction
+              fromLayer:(AVMutableVideoCompositionLayerInstruction *)fromLayer
+                toLayer:(AVMutableVideoCompositionLayerInstruction *)toLayer
+                   type:(TransitionType)type {
+    
+    CGAffineTransform identityTransform = CGAffineTransformIdentity;
+    CMTimeRange timeRange = instruction.timeRange;
+    CGFloat videoWidth = self.videoComposition.renderSize.width;
+    if (type == TransitionTypePush) {
+        CGAffineTransform fromEndTranform = CGAffineTransformMakeTranslation(-videoWidth, 0);
+        CGAffineTransform toStartTranform = CGAffineTransformMakeTranslation(videoWidth, 0);
+        
+        [fromLayer setTransformRampFromStartTransform:identityTransform toEndTransform:fromEndTranform timeRange:timeRange];
+        [toLayer setTransformRampFromStartTransform:toStartTranform toEndTransform:identityTransform timeRange:timeRange];
+    } else {
+        [fromLayer setOpacityRampFromStartOpacity:1.0 toEndOpacity:0.0 timeRange:timeRange];
+    }
+    
+    // 重新赋值
+    instruction.layerInstructions = @[fromLayer, toLayer];
+}
+
+- (void)buildOverLayer {
+    
+    CALayer *layer = [[CALayer alloc] init];
+    layer.frame = CGRectMake(0, 0, 40, 40);
+    layer.opacity = 1;
+    layer.backgroundColor = [UIColor yellowColor].CGColor;
+    
+    CAKeyframeAnimation *fadeInFadeOutAni = [CAKeyframeAnimation animationWithKeyPath:@"opacity"];
+    fadeInFadeOutAni.values = @[@(0),@(1),@(1),@(0)];
+    fadeInFadeOutAni.keyTimes = @[@(0),@(0.25),@(0.75),@(0)];
+    // 动画时间与时间轴的时间绑定
+    fadeInFadeOutAni.beginTime = CMTimeGetSeconds(CMTimeMakeWithSeconds(3, 1));
+    fadeInFadeOutAni.duration = CMTimeGetSeconds(CMTimeMakeWithSeconds(5, 1));
+    fadeInFadeOutAni.removedOnCompletion = NO;
+    
+    [layer addAnimation:fadeInFadeOutAni forKey:nil];
+    self.overLayer = layer;
+}
+
+/// 导出合成的视频
+- (void)export:(CompletedCombineBlock)completed {
+    
+    AVAssetExportSession *session = [[AVAssetExportSession alloc] initWithAsset:self.composition presetName:AVAssetExportPreset640x480];
+    NSURL *outputURL = [HcdVideoMaker createTemplateFileURL];
+    session.outputURL = outputURL;
+    session.outputFileType = AVFileTypeMPEG4;
+    if (self.overLayer != nil) {
+        CALayer *videoLayer = [[CALayer alloc] init];
+        videoLayer.frame = CGRectMake(0, 0, 1280, 720);
+        CALayer *animateLayer = [[CALayer alloc] init];
+        animateLayer.frame = CGRectMake(0, 0, 1280, 720);
+        [animateLayer addSublayer:videoLayer];
+        [animateLayer addSublayer:self.overLayer];
+        animateLayer.geometryFlipped = YES;
+        
+        AVVideoCompositionCoreAnimationTool *animateTool = [AVVideoCompositionCoreAnimationTool videoCompositionCoreAnimationToolWithPostProcessingAsVideoLayer:videoLayer inLayer:animateLayer];
+        self.videoComposition.animationTool = animateTool;
+    }
+    session.videoComposition = self.videoComposition;
+    
+    [session exportAsynchronouslyWithCompletionHandler:^{
+        NSLog(@"视频合成完成");
+        completed(YES, outputURL);
+    }];
+}
+
++ (NSURL *)createTemplateFileURL {
+    
+    NSString *path = [NSString stringWithFormat:@"%@composition.mp4", [HcdFileManager MovURL]];
+    NSURL *fileURL = [NSURL URLWithString:path];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:fileURL.path]) {
+        [[NSFileManager defaultManager] removeItemAtURL:fileURL error:nil];
+    }
+    return fileURL;
+}
+
+#pragma mark - 每一帧图片合成一个视频并写到本地
+
+- (void)makeVideoWithIndex:(NSInteger)index completed:(CompletedCombineBlock)completed {
+    
+    // path
+    NSURL *path = [[HcdFileManager MovURL] URLByAppendingPathComponent:[NSString stringWithFormat:@"%@%@.mov", @(self.movement), @(index)]];
+    [self deletePreviousTmpVideo:path];
+    
+    // writer
+    self.videoWriter = [[AVAssetWriter alloc] initWithURL:path fileType:AVFileTypeQuickTimeMovie error:nil];
+    if (!self.videoWriter) {
+        completed(NO, nil);
+        return;
+    }
+    
+    // input
+    NSDictionary *videoSettings = @{
+        AVVideoCodecKey: AVVideoCodecH264,
+        AVVideoWidthKey: @(self.size.width),
+        AVVideoHeightKey: @(self.size.height)
+    };
+    AVAssetWriterInput *writerInput = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeVideo outputSettings:videoSettings];
+    [self.videoWriter addInput:writerInput];
+    
+    // adapter
+    NSDictionary *bufferAttributes = @{
+        (NSString *)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32ARGB)
+    };
+    AVAssetWriterInputPixelBufferAdaptor *bufferAdapter = [AVAssetWriterInputPixelBufferAdaptor assetWriterInputPixelBufferAdaptorWithAssetWriterInput:writerInput
+                                                                                                                           sourcePixelBufferAttributes:bufferAttributes];
+    
+    [self.videoWriter startWriting];
+    [self.videoWriter startSessionAtSourceTime:kCMTimeZero];
+    
+    __block CMTime presentTime = CMTimeMakeWithSeconds(0, (int32_t)self.timescale);
+    __block NSInteger i = 0;
+    
+    [writerInput requestMediaDataWhenReadyOnQueue:self.mediaInputQueue usingBlock:^{
+        
+        NSInteger duration = self.isMovement ? self.transitionDuration : self.frameDuration;
+        presentTime = CMTimeMake(i * duration, (int32_t)self.timescale);
+        
+        UIImage *presentImage = self.images[index];
+        UIImage *nextImage = self.images.count > 1 && index != self.images.count - 1 ? self.images[index + 1] : nil;
+        
+        if (self.isMovement) {
+            presentTime = [self appendMovementBuffer:i
+                                        presentImage:presentImage
+                                           nextImage:nextImage
+                                                time:presentTime
+                                         writerInput:writerInput
+                                       bufferAdapter:bufferAdapter];
+        } else {
+            presentTime = [self appendTransitionBuffer:i
+                                          presentImage:presentImage
+                                             nextImage:nextImage
+                                                  time:presentTime
+                                           writerInput:writerInput
+                                         bufferAdapter:bufferAdapter];
+        }
+        
+        [self changeNextIfNeeded];
+        
+        [writerInput markAsFinished];
+        [self.videoWriter finishWritingWithCompletionHandler:^{
+            if (self.videoWriter.error) {
+                NSLog(@"%@", self.videoWriter.error);
+            }
+            completed(self.videoWriter.error == nil, path);
+        }];
+    }];
+    
 }
 
 @end
